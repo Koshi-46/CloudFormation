@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "DynamoDB DAX"
+Metadata:
+  "AWS::CloudFormation::Interface":
+    ParameterGroups:
+      - Label:
+          default: DynamoDB Table
+        Parameters:
+          - TableName
+          - CapacityMode
+          # - ProjectionType
+          # - StreamViewType
+      - Label:
+          default: DAX
+        Parameters:
+          - DAXPort
+          - DAXNodeType
+
+Parameters:
+  TableName:
+    Type: String
+  CapacityMode:
+    Description: "PROVISIONED | PAY_PER_REQUEST"  #オンデマンドモードの場合は"ProvisionedThroughput"を使用しない
+    Type: String
+    Default: PROVISIONED
+  # ProjectionType:
+  #   Description:  "KEYS_ONLY | INCLUDE | ALL"
+  #   Type: String
+  #   Default: INCLUDE
+  # StreamViewType:
+  #   Description: "KEYS_ONLY | NEW_IMAGE | OLD_IMAGE | NEW_AND_OLD_IMAGES"
+  #   Type: String
+  #   Default: KEYS_ONLY
+
+  DAXPort:
+    Type: String
+    Default: 8111
+  DAXNodeType:
+    Type: String
+    Default: dax.t3.small
+
+
+Resources:
+#-----------------------------------------------------------------------------
+# DynamoDB Table
+#-----------------------------------------------------------------------------
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: !Ref CapacityMode
+      AttributeDefinitions:
+        - AttributeName: "id"
+          AttributeType: "S"
+        - AttributeName: "created_at"
+          AttributeType: "S"
+      KeySchema: # HASH-パーティションキー RANGE-ソートキー
+        - AttributeName: "id"
+          KeyType: "HASH"
+        - AttributeName: "created_at"
+          KeyType: "RANGE"
+      # ProvisionedThroughput:
+      #   ReadCapacityUnits: 3
+      #   WriteCapacityUnits: 3
+      PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: false
+      # StreamSpecification:
+      #     StreamViewType: !Ref StreamViewType
+      # KinesisStreamSpecification:
+      #     StreamArn: String
+      TimeToLiveSpecification:
+        AttributeName: sample-TTL
+        Enabled: true
+      DeletionProtectionEnabled: false
+      # GlobalSecondaryIndexes:
+      #   - IndexName: idGSI
+      #     KeySchema:
+      #       - AttributeName: id
+      #         KeyType: HASH
+      #       - AttributeName: value
+      #         KeyType: RANGE
+      #     Projection:
+      #       NonKeyAttributes:  #インデックスに射影される非キー属性の名前
+      #         - id
+      #       ProjectionType: !Ref ProjectionType
+      #     ProvisionedThroughput:
+      #       ReadCapacityUnits: "1"
+      #       WriteCapacityUnits: "1"
+      # LocalSecondaryIndex
+      # LocalSecondaryIndexes:
+      #   - IndexName: SampleLSI
+      #     KeySchema:
+      #       - AttributeName: Gender
+      #         KeyType: HASH
+      #       - AttributeName: Inquiry
+      #         KeyType: RANGE
+      #     Projection:
+      #       ProjectionType: !Ref ProjectionType
+
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+
+
+#-----------------------------------------------------------------------------
+# DAX
+#-----------------------------------------------------------------------------
+  # # Security Group
+  DAXSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: DAXSecurityGroup
+      GroupDescription: Allow DAX.
+      VpcId: !ImportValue vpc
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: tcp
+          FromPort: !Ref DAXPort
+          ToPort: !Ref DAXPort
+
+  # # Cluster
+  DAXCluster:
+    Type: AWS::DAX::Cluster
+    Properties:
+      ClusterName: DAX-Cluster
+      NodeType: !Ref DAXNodeType
+      AvailabilityZones:
+        - !Sub "${AWS::Region}a"
+        - !Sub "${AWS::Region}c"
+      ReplicationFactor: 2  #ノード数
+      ClusterEndpointEncryptionType: NONE
+      Description: Test DAX Cluster
+      IAMRoleARN: !GetAtt DAXRole.Arn
+      ParameterGroupName: !Ref DAXParameterGroup
+      SecurityGroupIds:
+        - !Ref DAXSecurityGroup
+      SubnetGroupName: !Ref DAXSubnetGroup
+
+  # # Parameter Group
+  DAXParameterGroup:
+    Type: AWS::DAX::ParameterGroup
+    Properties:
+      Description: DAX Parameter Group
+      ParameterGroupName: DAX-ParameterGroup
+      ParameterNameValues:
+        query-ttl-millis: 10000
+        record-ttl-millis: 10000
+
+  # # Subnet Group
+  DAXSubnetGroup:
+    Type: AWS::DAX::SubnetGroup
+    Properties:
+      Description: Test DAX Subnet Group
+      SubnetGroupName: DAX-SubnetGroup
+      SubnetIds:
+        - !ImportValue private-subnet-a
+        - !ImportValue private-subnet-c
+
+  # # IAM Role
+  DAXRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - dax.amazonaws.com
+      Policies:
+        - PolicyName: DAXPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  - !GetAtt DynamoDBTable.Arn
+
+
+
+
+
+# Outputs:
+#   DAXClusterArn:
+#     Value: !GetAtt DAXCluster.Arn
+
+#   DAXClusterDiscoveryEndpointURL:
+#     Value: !GetAtt DAXCluster.ClusterDiscoveryEndpointURL
