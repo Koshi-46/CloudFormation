@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Limit S3 access to CloudFront only
+Parameters:
+  ViewerProtocolPolicy:
+    Description: "allow-all | https-only | redirect-to-https"
+    Type: String
+    Default: allow-all
+  PriceClass:
+    # PriceClass_10（北米と欧州のみ） | PriceClass_200（北米、欧州、アジア、中東、アフリカ）
+    Description: "PriceClass_10 | PriceClass_200 | PriceClass_All"
+    Type: String
+    Default: PriceClass_200
+
+Resources:
+# ------------------------------------------------------------#
+# S3
+# ------------------------------------------------------------#
+  CloudFrontOriginBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              # KMSMasterKeyID: -----
+              SSEAlgorithm: AES256
+      BucketName: cloudfront-origin-bucket
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudFrontOriginBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AllowCloudFrontServicePrincipal"
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "cloudfront.amazonaws.com"
+            Action:
+              - "s3:GetObject"
+            Resource:
+              - !Sub ${CloudFrontOriginBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFront}'
+
+
+# ------------------------------------------------------------#
+# CloudFront
+# ------------------------------------------------------------#
+  OAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Description: Access Control
+        Name: OAC
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultCacheBehavior:
+          AllowedMethods: #許可されたHTTPメソッド
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          TargetOriginId: S3
+          ViewerProtocolPolicy: !Ref ViewerProtocolPolicy
+        Enabled: true
+        Origins:
+          - DomainName: !GetAtt CloudFrontOriginBucket.DomainName
+            Id: S3
+            OriginAccessControlId: !GetAtt OAC.Id
+            S3OriginConfig: #CloudFrontでS3をオリジンにする際に必要
+              OriginAccessIdentity: '' #空の要素を指定してオリジンアクセスIDを利用しない
+        PriceClass: !Ref PriceClass
+        # ViewerCertificate: #SSL証明書の設定
+        #   AcmCertificateArn: "arn:aws:acm:us-east-1:<アカウント番号>:certificate/<証明書番号>"
+        #   SslSupportMethod: sni-only
