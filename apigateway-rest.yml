@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: If an HTTP request is received, API Gateway will call the Lambda function on your behalf
+Metadata:
+    "AWS::CloudFormation::Interface":
+      ParameterGroups:
+        - Label:
+            default: Project Name
+          Parameters:
+            - PJName
+        - Label:
+            default: API
+          Parameters:
+            - EndpointType
+        - Label:
+            default: Method
+          Parameters:
+            - MethodType
+            - AuthorizationType
+            - IntegrationType
+            - PassthroughBehavior
+
+Parameters:
+  PJName:
+    Type: String
+
+  EndpointType:
+    # HTTP APIはREGIONALのみ
+    Description: "EDGE | REGIONAL | PRIVATE"
+    Type: String
+    Default: REGIONAL
+
+  MethodType:
+    Description: "ANY | DELETE | GET | HEAD | OPTIONS | PATCH | POST | PUT"
+    Type: String
+    Default: POST
+  AuthorizationType:
+    Description: "AWS_IAM | COGNITO_USER_POOLS | CUSTOM | NONE"
+    Type: String
+    Default: NONE
+  IntegrationType:
+    Description: "HTTP | HTTP_PROXY | AWS | AWS_PROXY | MOCK"
+    Type: String
+    Default: AWS_PROXY
+  PassthroughBehavior:
+    Description: "NEVER | WHEN_NO_MATCH | WHEN_NO_TEMPLATES"
+    Type: String
+    Default: WHEN_NO_MATCH
+  # ConnectionType:
+  #   Description: "INTERNET | VPC_LINK"
+  #   Type: String
+  #   Default: INTERNET
+
+Resources:
+# ------------------------------------------------------------#
+# Lambda
+# ------------------------------------------------------------#
+
+
+# ------------------------------------------------------------#
+# API Gateway Invocation Role (IAM)
+# ------------------------------------------------------------#
+  ApiGatewayLambdaInvocationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ApiGatwayLambdaInvocationRole
+      Description: This role allows API Gateways to invoke Lambda functions.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonKinesisFirehoseFullAccess
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+
+# ------------------------------------------------------------#
+# API Gateway
+# ------------------------------------------------------------#
+  # API
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${PJName}-RestApi
+      Description: REST API Gateway to access Lambda
+      EndpointConfiguration:
+        Types:
+          - !Ref EndpointType
+
+  # Resource
+  RestApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: Test
+
+  # Method
+  RestApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RestApiResource
+      HttpMethod: !Ref MethodType
+      AuthorizationType: !Ref AuthorizationType
+      Integration:
+        Type: !Ref IntegrationType
+        IntegrationHttpMethod: POST
+        Credentials: !GetAtt ApiGatewayLambdaInvocationRole.Arn
+        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:ここにLambda関数名を記載/invocations
+        PassthroughBehavior: !Ref PassthroughBehavior
+        # ConnectionType: !Ref ConnectionType
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # Deployment
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref RestApi
+    DependsOn: RestApiMethod
+
+  # Stage
+  RestApiStageExampledata:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: prod
+      Description: production stage
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref RestApiDeployment
+      TracingEnabled: true # X-Rayトレーシング
+      # CacheClusterEnabled: false
+      # CacheClusterSize: 0.5
