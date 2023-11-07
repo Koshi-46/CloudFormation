@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Backup Plan template to back up EC2.
+Parameters:
+  RetentionPeriod:
+    Description: "バックアップの保持期間"
+    Type: String
+    Default: 31
+Resources:
+  #バックアッププラン
+  BackupPlanForEC2:
+    Type: "AWS::Backup::BackupPlan"
+    Properties:
+      BackupPlan:
+        BackupPlanName: "BackupPlanForEC2"
+        AdvancedBackupSettings:
+          -
+            ResourceType: EC2
+            BackupOptions:
+              WindowsVSS: disabled
+        #バックアップルール
+        BackupPlanRule:
+          -
+            RuleName: "RuleForMonthlyBackups"
+            TargetBackupVault: Default
+            ScheduleExpression: "cron(0 16 1 * ? *)" # 毎月1日 16:00UTC/ 1:00JST開始
+            Lifecycle:
+              DeleteAfterDays: !Ref RetentionPeriod
+            CopyActions:
+              -
+                  DestinationBackupVaultArn: !Sub arn:${AWS::Partition}:backup:ap-northeast-3:${AWS::AccountId}:backup-vault:Default
+                  Lifecycle:
+                   DeleteAfterDays: !Ref RetentionPeriod
+  #リソース割り当て
+  BackupSelection:
+    Type: "AWS::Backup::BackupSelection"
+    Properties:
+      BackupSelection:
+        SelectionName: "BackupSelectionForEC2"
+        IamRoleArn: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/AWSBackupDefaultServiceRole" #手動で作成する必要がある（先にコンソールでバックアップを作成しておくと自動でロール作成されるためおすすめ）
+        Resources:
+          - arn:aws:ec2:*:*:instance/*
+        # Conditions:
+        #   StringEquals:
+        #     - ConditionKey: BackupPlan
+        #       ConditionValue: BackupPlanForEC2
+      BackupPlanId: !Ref BackupPlanForEC2
+    # DependsOn: BackupPlanForEC2
