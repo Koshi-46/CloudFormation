@@ -10,10 +10,9 @@ Parameters:
       - REGIONAL
       - CLOUDFRONT
     Description: "CLOUDFRONT | REGIONAL"
-  # WebAclAssociationResourceArn:
-  #   Type: String
-  #   Default: "arn:aws:elasticloadbalancing:ap-northeast-1:XXXXXXXXXXXX:loadbalancer/app/XXXXXXXXXXXX"
-  #   Description: Enter RegionalResource(ALB,APIGateway,AppSync) ARN or CloudFront ARN to associate with WEBACL.
+  WebAclAssociationResourceArn:
+    Type: String
+    Default: "arn:aws:elasticloadbalancing:ap-northeast-1:XXXXXXXXXXXX:loadbalancer/app/XXXXXXXXXXXX"
 Resources:
 #-----------------------------------------------------------------------------
 # S3
@@ -80,7 +79,7 @@ Resources:
   WebACLAssociation:
     Type: AWS::WAFv2::WebACLAssociation
     Properties:
-      ResourceArn: !ImportValue SimpleRoutingLoadBalancer
+      ResourceArn: !Ref WebAclAssociationResourceArn
       WebACLArn: !GetAtt WebAcl.Arn
 
 
