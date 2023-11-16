@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Transfer Salesforce data to S3 via Appflow"
+Parameters:
+  FileType:
+    Description: "CSV | JSON | PARQUET"
+    Type: String
+    Default: CSV
+  TriggerType:
+    Description: "Event | OnDemand | Scheduled"
+    Type: String
+    Default: OnDemand
+
+Resources:
+#-----------------------------------------------------------------------------
+# S3
+#-----------------------------------------------------------------------------
+    TransferFromSalesforceBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: !Ref SSEAlgorithm
+            BucketName: transfer-from-salesforce
+            OwnershipControls:
+                Rules:
+                    - ObjectOwnership: BucketOwnerEnforced
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: True
+                BlockPublicPolicy: True
+                IgnorePublicAcls: True
+                RestrictPublicBuckets: True
+            Tags:
+                - Key: Name
+                  Value: transfer-from-salesforce
+
+    # バケットポリシー（マネジメントコンソールから作成した場合S3へのバケットポリシーは自動的に付与されるが、CFnからの作成では自動付与が行われないため事前にバケットポリシーを定義する必要がある）
+    TransferFromSalesforceBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref TransferFromSalesforceBucket
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Service: appflow.amazonaws.com
+              Action:
+                - "s3:*"
+              Resource:
+                - !GetAtt TransferFromSalesforceBucket.Arn
+                - !Sub arn:${AWS::Partition}:s3:::${TransferFromSalesforceBucket}/*
+
+
+
+#-----------------------------------------------------------------------------
+# AppFlow
+#-----------------------------------------------------------------------------
+  SalesforceFlow:
+    Type: AWS::AppFlow::Flow
+    Properties:
+      FlowName: Salesforce-Transfer
+      Description: "Flow for transferring Salesforce Contact objects data to S3"
+      SourceFlowConfig:
+        ConnectorType: Salesforce
+        ConnectorProfileName: salesforce_connection
+        SourceConnectorProperties:
+           Salesforce:
+            Object: Contact
+      DestinationFlowConfigList:
+        - ConnectorProfileName: String
+          ConnectorType: S3
+          DestinationConnectorProperties:
+            S3:
+              BucketName: !Ref TransferFromSalesforceBucket
+              BucketPrefix: /Contact
+              S3OutputFormatConfig:
+                FileType: !Ref FileType
+      TriggerConfig:
+        TriggerType: !Ref TriggerType
+      Tasks: #フィールドのマッピングやフィルタリング操作
+        - TaskType: Filter
+          ConnectorOperator:
+            Salesforce: PROJECTION
+          SourceFields:
+            - LastName
+        - TaskType: Map
+          SourceFields: #マッピングするフィールド名
+            - LastName
+          DestinationField: LastName
+ 
+
+
