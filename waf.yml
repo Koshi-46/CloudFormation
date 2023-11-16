@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "WAF associated with the simple project ALB"
+Parameters:
+  ResourceType:
+    Type: String
+    Default: REGIONAL
+    AllowedValues:
+      - REGIONAL
+      - CLOUDFRONT
+    Description: "CLOUDFRONT | REGIONAL"
+  # WebAclAssociationResourceArn:
+  #   Type: String
+  #   Default: "arn:aws:elasticloadbalancing:ap-northeast-1:XXXXXXXXXXXX:loadbalancer/app/XXXXXXXXXXXX"
+  #   Description: Enter RegionalResource(ALB,APIGateway,AppSync) ARN or CloudFront ARN to associate with WEBACL.
+Resources:
+#-----------------------------------------------------------------------------
+# S3
+#-----------------------------------------------------------------------------
+    WafLogBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+            BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: !Ref SSEAlgorithm
+            BucketName: aws-waf-logs
+            OwnershipControls:
+                Rules:
+                    - ObjectOwnership: BucketOwnerEnforced
+            PublicAccessBlockConfiguration:
+                BlockPublicAcls: True
+                BlockPublicPolicy: True
+                IgnorePublicAcls: True
+                RestrictPublicBuckets: True
+            Tags:
+                - Key: Name
+                  Value: aws-waf-logs
+                  
+                  
+                  
+# ------------------------------------------------------------#
+# WAF
+# ------------------------------------------------------------#
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: SimpleAlb-dev-web-acl
+      Scope: !Ref ResourceType
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        MetricName: SimpleAlb-dev-web-acl
+        CloudWatchMetricsEnabled: true
+        SampledRequestsEnabled: true  #過去3時間以内の保護対象リソースに対するリクエストをAWSマネジメントコンソール上に表示させる機能
+      Rules:
+        -
+          Name: AWS-AWSManagedRulesCommonRuleSet
+          Priority: 1
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              # ExcludedRules:  #一部のルールを特定のアクション（カウントモード等）にする際に使用する
+              #   - Name: NoUserAgent_HEADER
+          OverrideAction:
+            # None: {}
+            Count: {}  #カウントモードを適用させる場合
+          VisibilityConfig:  #メトリクスとWebリクエストのサンプリングを制御するための可視性の構成
+            CloudWatchMetricsEnabled: true  #WAFをCloudWatchメトリクスの監視対象にする
+            SampledRequestsEnabled: true  #直近3時間のリクエスト履歴を確認する
+            MetricName: AWS-AWSManagedRulesCommonRuleSet
+
+
+
+# ------------------------------------------------------------#
+# Association
+# ------------------------------------------------------------#
+  WebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !ImportValue SimpleRoutingLoadBalancer
+      WebACLArn: !GetAtt WebAcl.Arn
+
+
+# ------------------------------------------------------------#
+# Log
+# ------------------------------------------------------------#
+  WAFLogConfig:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      LogDestinationConfigs:
+        - !ImportValue WafLogBucket
+      ResourceArn: !GetAtt WebAcl.Arn
