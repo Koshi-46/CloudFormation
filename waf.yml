@@ -1,6 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "WAF associated with the simple project ALB"
 Parameters:
+  ProjectName:
+    Type: String
   ResourceType:
     Type: String
     Default: REGIONAL
@@ -44,12 +46,12 @@ Resources:
   WebAcl:
     Type: AWS::WAFv2::WebACL
     Properties:
-      Name: SimpleAlb-dev-web-acl
+      Name: !Sub ${ProjectName}-web-acl
       Scope: !Ref ResourceType
       DefaultAction:
         Allow: {}
       VisibilityConfig:
-        MetricName: SimpleAlb-dev-web-acl
+        MetricName: !Sub ${ProjectName}-web-acl
         CloudWatchMetricsEnabled: true
         SampledRequestsEnabled: true  #過去3時間以内の保護対象リソースに対するリクエストをAWSマネジメントコンソール上に表示させる機能
       Rules:
